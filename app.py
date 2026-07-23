@@ -4,6 +4,16 @@ import streamlit as st
 
 st.set_page_config(page_title="MARC AR 포인트 추출기", page_icon="📚", layout="centered")
 
+# 페이지 설정 (아이콘을 로고 파일로 변경)
+try:
+    img = Image.open("logo.png") # 폴더에 넣어둔 로고 파일 이름
+    st.set_page_config(page_title="MARC AR 포인트 추출기", page_icon=img, layout="centered")
+    # 로고 이미지를 화면 상단에 표시 (크기 조절: width=200)
+    st.image(img, width=150)
+except FileNotFoundError:
+    # 로고 파일이 없을 경우 기본 이모지 사용
+    st.set_page_config(page_title="MARC AR 포인트 추출기", page_icon="📚", layout="centered")
+
 st.title("📚 코라스 MARC AR 포인트 추출기")
 st.write("코라스(KOLAS)에서 추출한 마크(.TXT) 파일을 업로드하면 AR 포인트와 등록번호를 자동으로 정리해 줍니다.")
 
