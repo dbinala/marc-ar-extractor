@@ -104,7 +104,7 @@ if uploaded_file is not None:
                 for chunk in matches_090[1:]:
                     chunk_sub = chunk[:120]
                     a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', chunk_sub)
-                    b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', chunk_sub)
+                    b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.c]+)', chunk_sub)
                     s_a = a_match.group(1).strip() if a_match else ""
                     s_b = b_match.group(1).strip() if b_match else ""
                     if s_a or s_b:
@@ -123,7 +123,8 @@ if uploaded_file is not None:
             part_a = selected_a
             part_b = selected_b
             if part_b:
-                clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', part_b)
+                # 도서기호 뒤에 붙는 c 및 하이픈, 숫자 조합(예: G226m c3-10 등)까지 포함하도록 정규식 확장
+                clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.c]*)', part_b)
                 if clean_b:
                     part_b = clean_b.group(1)
 
