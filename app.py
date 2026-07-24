@@ -40,20 +40,16 @@ if uploaded_file is not None:
                 continue
             
             # ISO2709 정식 구조 파싱 (Leader(24바이트) + Directory(12바이트씩) + \x1e + Variable Fields)
-            # 디렉토리와 가변 필드 영역 분리
             if len(rec) > 24:
                 leader = rec[:24]
-                # 첫 번째 가변 필드 구분자(\x1e) 위치 탐색
                 idx_sep = rec.find('\x1e')
                 if idx_sep != -1:
                     directory_part = rec[24:idx_sep]
                     variable_fields_part = rec[idx_sep+1:]
                 else:
-                    # 구분자가 없을 경우 대체 처리
                     directory_part = ""
                     variable_fields_part = rec[24:]
                 
-                # 디렉토리 파싱 (각 12바이트: 태그 3바이트, 길이 4바이트, 시작위치 5바이트)
                 fields = []
                 for i in range(0, len(directory_part), 12):
                     entry = directory_part[i:i+12]
@@ -72,7 +68,6 @@ if uploaded_file is not None:
 
             # 1. AR Points 추출 (521 필드 또는 전체 텍스트 내 탐색)
             ar_point = ""
-            # 521 필드가 있다면 우선 탐색
             ar_found = False
             for tag, f_data in fields:
                 if tag == '521':
@@ -93,7 +88,6 @@ if uploaded_file is not None:
             candidates_090 = []
             for tag, f_data in fields:
                 if tag == '090':
-                    # 서브필드 분리 (보통 \x1f 또는 로 시작)
                     subfields = re.split(r'[\x1f]', f_data)
                     s_a = ""
                     s_b = ""
@@ -104,9 +98,7 @@ if uploaded_file is not None:
                             s_b = sub[1:].strip()
                     candidates_090.append((s_a, s_b))
 
-            # 정규식 기반 백업 탐색 (디렉토리 파싱 실패 시 대비)
             if not candidates_090 and '090' in rec:
-                # 디렉토리 090과 혼동을 피하기 위해 가변 필드 영역에서 찾기
                 search_target = variable_fields_part if 'variable_fields_part' in locals() else rec
                 matches_090 = search_target.split('090')
                 for chunk in matches_090[1:]:
@@ -118,7 +110,6 @@ if uploaded_file is not None:
                     if s_a or s_b:
                         candidates_090.append((s_a, s_b))
 
-            # $a와 $b가 모두 존재하는 필드를 최우선으로 선택
             selected_a = ""
             selected_b = ""
             for sa, sb in candidates_090:
@@ -129,7 +120,6 @@ if uploaded_file is not None:
             if not selected_a and not selected_b and candidates_090:
                 selected_a, selected_b = candidates_090[0]
 
-            # 도서기호 정제
             part_a = selected_a
             part_b = selected_b
             if part_b:
@@ -137,8 +127,13 @@ if uploaded_file is not None:
                 if clean_b:
                     part_b = clean_b.group(1)
 
+            # 분류번호와 도서기호를 하나로 합치기
+            if part_a and part_b:
+                call_number = f"{part_a} {part_b}"
+            else:
+                call_number = part_a or part_b
+
             # 3. 049 필드 추출 (등록번호 여러 개 및 별치기호 처리)
-            # 049 필드들 수집
             loc_reg_pairs = []
             for tag, f_data in fields:
                 if tag == '049':
@@ -155,9 +150,7 @@ if uploaded_file is not None:
                     for r in reg_list:
                         loc_reg_pairs.append((f_val, r))
 
-            # 디렉토리 파싱으로 049를 못 찾았을 경우 정규식 백업
             if not loc_reg_pairs:
-                # 레코드 전체에서 049 블록 단위로 등록번호 및 별치기호 추출
                 f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
                 f_val = f_match.group(1).strip() if f_match else ""
                 reg_no_matches = re.findall(r'(DJU[A-Za-z0-9\-_]+)', rec)
@@ -165,14 +158,12 @@ if uploaded_file is not None:
                     loc_reg_pairs.append((f_val, r))
 
             if not loc_reg_pairs:
-                # 기본 단일 등록번호 추출 시도
                 reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', rec)
                 reg_no = reg_no_match.group(1) if reg_no_match else ""
                 f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
                 f_val = f_match.group(1).strip() if f_match else ""
                 loc_reg_pairs.append((f_val, reg_no))
 
-            # 별치기호 변환 규칙 적용
             def get_location_label(f_val):
                 if f_val == 'KP': return "원-유"
                 elif f_val == 'KC': return "원아"
@@ -183,14 +174,12 @@ if uploaded_file is not None:
                 if not isinstance(text, str): return text
                 return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
 
-            # 등록번호마다 각각 한 행씩 생성
             for f_val, reg_no in loc_reg_pairs:
                 location_label = get_location_label(f_val)
                 data_list.append({
-                    "별치기호": clean_text(location_label),
-                    "분류번호(090 $a)": clean_text(part_a),
-                    "도서기호(090 $b)": clean_text(part_b),
                     "시작등록번호": clean_text(reg_no),
+                    "별치기호": clean_text(location_label),
+                    "청구기호": clean_text(call_number),
                     "AR_Points": clean_text(ar_point)
                 })
                 
