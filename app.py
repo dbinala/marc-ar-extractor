@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("청구기호 추출 패치 버전입니다.")
+st.write("청구기호(090 필드 a, b 정밀 패치) 버전입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -55,23 +55,30 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. 청구기호(090 필드 파싱 최적화)
-                    # 090 기호 뒤에 나오는 a와 b 서브필드를 정밀하게 낚아챕니다.
+                    # 3. 청구기호(090 필드 전용 정밀 파싱 - ISBN 혼동 방지)
                     part_a = ""
                     part_b = ""
                     
-                    # '090' 문자열을 기준으로 뒤쪽 텍스트를 자릅니다.
-                    if '090' in rec:
+                    # 레코드 내에서 '090' 필드가 시작되는 정확한 위치 혹은 라인을 탐색
+                    # 020 필드와 구별하기 위해 '090' 태그 구조(공백이나 인디케이터 동반)를 타겟팅
+                    field_090_match = re.search(r'(?:^|\n)\s*090.*?(?=\n\d{3}|\Z)', rec, re.DOTALL)
+                    
+                    target_chunk = ""
+                    if field_090_match:
+                        target_chunk = field_090_match.group(0)
+                    elif '090' in rec:
+                        # 대안: 090이 포함된 경우 그 주변부 150글자 확보
                         idx = rec.find('090')
-                        target_chunk = rec[idx:idx+100] # 090 뒤의 100글자 정도만 집중 탐색
-                        
-                        # a 뒤의 숫자 추출
-                        a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9]+)', target_chunk)
+                        target_chunk = rec[idx:idx+150]
+                    
+                    if target_chunk:
+                        # a 서브필드 추출 (기존 도서관 청구기호 분류번호 패턴: 숫자 및 소수점 등)
+                        a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9\.]+)', target_chunk)
                         if a_sub:
                             part_a = a_sub.group(1).strip()
                             
-                        # b 뒤의 문자/숫자 조합 추출
-                        b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9]+)', target_chunk)
+                        # b 서브필드 추출 (도서기호: 알파벳, 숫자, 특수문자 조합 허용)
+                        b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.\s]+)', target_chunk)
                         if b_sub:
                             part_b = b_sub.group(1).strip()
                     
@@ -106,3 +113,5 @@ if uploaded_file is not None:
             
             with open(excel_file, "rb") as f:
                 st.download_button(label="📥 엑셀 다운로드", data=f, file_name=excel_file)
+        else:
+            st.warning("조건에 맞는 데이터를 찾지 못했습니다.")
