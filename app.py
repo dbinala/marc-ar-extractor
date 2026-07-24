@@ -4,7 +4,7 @@ import streamlit as st
 from PIL import Image
 
 # 웹페이지 기본 설정
-st.set_page_config(page_title="MARC AR 포인트 추출기", page_icon="📚", layout="centered")
+st.set_page_config(page_title="MARC AR Points 추출기", page_icon="📚", layout="centered")
 
 # 로고 이미지 불러오기 (logo.png 파일이 있을 때만 표시)
 try:
