@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("별치기호와 청구기호 열 분리 정밀 패치 버전입니다.")
+st.write("090 필드 강제 추출 정밀 패치 버전입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -45,7 +45,7 @@ if uploaded_file is not None:
                     reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', rec)
                     reg_no = reg_no_match.group(1) if reg_no_match else ""
                     
-                    # 2. 별치기호 (049 필드) - 독립 열로 분리
+                    # 2. 별치기호 (049 필드)
                     location_label = ""
                     f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
                     if f_match:
@@ -55,35 +55,36 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. 청구기호 구성요소 (분류번호 $a와 도서기호 $b를 각각 독립 열로 추출)
+                    # 3. 청구기호 (090 필드 강제 정밀 파싱)
                     part_a = ""
                     part_b = ""
                     
-                    lines = rec.splitlines()
-                    for line in lines:
-                        # 020(ISBN) 라인 제외하고 명확히 090 라인 타겟팅
-                        if '090' in line and '020' not in line:
-                            # a 서브필드 (분류번호: 숫자 및 소수점만 허용, ISBN 번호 유입 원천 차단)
-                            a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', line)
-                            if a_sub:
-                                part_a = a_sub.group(1).strip()
-                                
-                            # b 서브필드 (도서기호: 핵심 패턴만 추출)
-                            b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', line)
-                            if b_sub:
-                                raw_b = b_sub.group(1).strip()
-                                clean_b_match = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', raw_b)
-                                if clean_b_match:
-                                    part_b = clean_b_match.group(1)
-                                else:
-                                    part_b = raw_b
-                            break
+                    # 레코드 전체에서 '090'이 포함된 위치를 찾아, 그 주변(또는 090 이후 문자열)에서 a와 b 서브필드 패턴을 직접 탐색
+                    if '090' in rec:
+                        idx_090 = rec.find('090')
+                        # 090부터 일정 길이(또는 다음 필드 전까지)의 청구기호 블록을 잘라냄
+                        chunk_090 = rec[idx_090:idx_090+120]
+                        
+                        # 분류번호 $a (숫자와 소수점) 추출
+                        a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', chunk_090)
+                        if a_match:
+                            part_a = a_match.group(1).strip()
+                            
+                        # 도서기호 $b 추출
+                        b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', chunk_090)
+                        if b_match:
+                            raw_b = b_match.group(1).strip()
+                            # 불필요한 뒷부분이 딸려오는 것 방지
+                            clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', raw_b)
+                            if clean_b:
+                                part_b = clean_b.group(1)
+                            else:
+                                part_b = raw_b
 
                     def clean_text(text):
                         if not isinstance(text, str): return text
                         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
 
-                    # 각각의 요소를 개별 컬럼으로 딕셔너리에 담기
                     data_list.append({
                         "별치기호": clean_text(location_label),
                         "분류번호(090 $a)": clean_text(part_a),
