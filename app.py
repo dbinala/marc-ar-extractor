@@ -4,9 +4,10 @@ import pandas as pd
 
 def parse_marc_record(record_text):
     """
-    단일 MARC 레코드 텍스트에서 049(별치기호 등)와 090(청구기호) 필드를 안전하게 파싱하는 함수
+    단일 MARC 레코드 텍스트에서 521(AR Points), 049(별치기호 등), 090(청구기호) 필드를 안전하게 파싱하는 함수
     """
-    shelf_location = ""  # 별치기호 (049 필드 등에서 추출)
+    ar_points = ""       # 521 필드 등에서 추출할 AR Points
+    shelf_location = ""  # 별치기호 (049 필드)
     call_number = ""     # 청구기호 (090 필드)
     
     lines = record_text.splitlines()
@@ -16,13 +17,19 @@ def parse_marc_record(record_text):
         if not line:
             continue
             
-        # 049 필드 처리
-        if line.startswith("049"):
+        # 521 필드 (AR Points 관련 데이터) 처리
+        if line.startswith("521"):
+            match_521 = re.search(r'521\s+(.*)', line)
+            if match_521:
+                ar_points = match_521.group(1).strip()
+                
+        # 049 필드 처리 (별치기호)
+        elif line.startswith("049"):
             f_match = re.search(r'\$f\s*([^\$\t]+)', line)
             if f_match:
                 shelf_location = f_match.group(1).strip()
             
-        # 090 필드 처리
+        # 090 필드 처리 (청구기호)
         elif line.startswith("090"):
             sub_a = re.search(r'\$a\s*([^\$\t]+)', line)
             sub_b = re.search(r'\$b\s*([^\$\t]+)', line)
@@ -37,25 +44,27 @@ def parse_marc_record(record_text):
             elif b_val:
                 call_number = b_val
                 
-    return shelf_location, call_number
+    return ar_points, shelf_location, call_number
 
 
 def process_marc_content(content):
     """
-    마크 파일 전체 내용을 읽어와 레코드별로 파싱하는 함수
+    마크 파일 전체 내용을 읽어와 레코드별로 파싱하는 함수 (다양한 줄바꿈 패턴 대응)
     """
     results = []
     
-    # 레코드 구분 (빈 줄이나 표준 구분자 기준)
+    # 코라스 반출 파일 등의 다양한 레코드 구분 패턴에 맞춰 분할
     records = re.split(r'\n\s*\n', content)
-    
+    if len(records) <= 1:
+        records = [content]
+
     for idx, record in enumerate(records):
         if not record.strip():
             continue
             
-        shelf, call = parse_marc_record(record)
+        ar, shelf, call = parse_marc_record(record)
         
-        # 2차 보완 탐색 (데이터 누락 방지)
+        # 만약 090이 정확히 안 잡혔을 경우 백업 탐색
         if not call:
             match_090 = re.search(r'090.*?\$a([^\$]+)(?:\$b([^\$]+))?', record)
             if match_090:
@@ -65,6 +74,7 @@ def process_marc_content(content):
 
         results.append({
             'No': idx + 1,
+            'AR Points': ar,
             '별치기호': shelf,
             '청구기호': call
         })
@@ -73,8 +83,8 @@ def process_marc_content(content):
 
 
 # Streamlit UI 구성
-st.title("📚 MARC 파일 별치 및 청구기호 추출기")
-st.write("코라스(KOLAS) 등에서 반출된 MARC 파일을 업로드하면 별치기호와 청구기호를 깔끔하게 추출해 드립니다.")
+st.title("📚 MARC AR Points & 청구기호 추출기")
+st.write("코라스(KOLAS) 등에서 반출된 MARC 파일을 업로드하면 AR Points, 별치기호, 청구기호를 추출해 드립니다.")
 
 uploaded_file = st.file_uploader("MARC(.mrc 또는 .txt) 파일을 업로드하세요", type=["mrc", "txt"])
 
@@ -97,7 +107,7 @@ if uploaded_file is not None:
             st.download_button(
                 label="결과 엑셀(CSV) 다운로드",
                 data=csv,
-                file_name="parsed_marc_result.csv",
+                file_name="marc_ar_points_result.csv",
                 mime="text/csv",
             )
         else:
