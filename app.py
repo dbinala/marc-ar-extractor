@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("090 필드 정밀 청구기호 추출 패치 버전입니다.")
+st.write("청구기호(ISBN 혼입 방지 및 도서기호 정제 패치) 버전입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -31,7 +31,6 @@ if uploaded_file is not None:
     if full_text is None:
         st.error("파일 인코딩을 인식할 수 없습니다.")
     else:
-        # 레코드 단위로 분리
         records = re.split(r'[\x1d\n]+', full_text)
         data_list = []
         
@@ -46,7 +45,7 @@ if uploaded_file is not None:
                     reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', rec)
                     reg_no = reg_no_match.group(1) if reg_no_match else ""
                     
-                    # 2. 별치기호 (049 필드) - 기존 정상 작동 유지
+                    # 2. 별치기호 (049 필드)
                     location_label = ""
                     f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
                     if f_match:
@@ -56,29 +55,34 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. 청구기호 (090 필드 전용 정밀 패치: ISBN 020 필드 원천 차단)
+                    # 3. 청구기호 (090 필드 정밀 파싱 - ISBN 및 불필요한 뒷부분 철저 차단)
                     part_a = ""
                     part_b = ""
                     
                     lines = rec.splitlines()
                     for line in lines:
-                        # '090'으로 시작하거나 명확히 포함된 라인만 타겟팅 (020 ISBN 라인 절대 배제)
-                        if ('090' in line or line.strip().startswith('090')) and '020' not in line:
-                            # a 서브필드: ISBN 숫자(13자리 등)가 절대 들어오지 않도록 분류번호 형태만 추출 (예: 소수점 포함 숫자)
-                            a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9\.]+(?:\s+[0-9\.]+)*)', line)
+                        # 020(ISBN) 라인은 절대 090으로 읽지 않도록 필터링 강화
+                        if '090' in line and '020' not in line:
+                            # a 서브필드 (분류번호: 숫자와 소수점만 허용, ISBN 번호가 섞이는 것 원천 차단)
+                            a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', line)
                             if a_sub:
-                                val_a = a_sub.group(1).strip()
-                                # 혹시라도 10자리/13자리 ISBN 숫자가 a로 잘못 잡히는 경우 방지
-                                if not re.match(r'^\d{10,13}$', val_a.replace('.', '')):
-                                    part_a = val_a
-                                    
-                            # b 서브필드: 저자기호/권호 등 필요한 문자열만 깔끔하게 추출 (뒤에 붙는 불필요한 메타데이터 차단)
+                                part_a = a_sub.group(1).strip()
+                                
+                            # b 서브필드 (도서기호: 알파벳으로 시작해서 기호/숫자가 붙는 일반적인 도서기호 형태만 깔끔하게 추출)
+                            # 예: M478hb 까지만 잡히고 뒤에 붙는 불필요한 찌꺼기(1 aMcCarty 등)는 잘라냄
                             b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', line)
                             if b_sub:
-                                part_b = b_sub.group(1).strip()
+                                raw_b = b_sub.group(1).strip()
+                                # 혹시 뒤에 붙을 수 있는 원치 않는 문자열 패턴을 정규식으로 한번 더 다듬기
+                                # 알파벳+숫자 조합의 핵심 도서기호 패턴만 남김 (예: M478hb)
+                                clean_b_match = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', raw_b)
+                                if clean_b_match:
+                                    part_b = clean_b_match.group(1)
+                                else:
+                                    part_b = raw_b
                             break
                     
-                    # 조합 만들기: [별치기호] [a분류번호] [b도서기호]
+                    # 조합 만들기: [별치기호] [a숫자] [b문자]
                     call_parts = []
                     if location_label: call_parts.append(location_label)
                     if part_a: call_parts.append(part_a)
