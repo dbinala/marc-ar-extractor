@@ -14,7 +14,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("코라스(KOLAS) 마크 파일에서 별치기호, 청구기호, 등록번호, AR 포인트를 자동으로 추출합니다.")
+st.write("코라스(KOLAS) 마크 파일에서 별치기호, 청구기호, 등록번호, AR Points를 자동으로 추출합니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -60,9 +60,10 @@ if uploaded_file is not None:
                         else:
                             location_label = f_val
                     
-                    # 3. 청구기호 추출 (090 필드의 a와 b 조합)
+                    # 3. 청구기호 추출 (오직 090 필드가 명확히 있는 경우에만 a와 b 조합)
                     call_number = ""
-                    field_090_match = re.search(r'090\s*(.*?)(?=\n|\x1e|\d{3}\s|$)', rec, re.DOTALL)
+                    # 090 필드 영역을 정확히 타겟팅 (다른 필드 020 등이 섞이지 않도록 함)
+                    field_090_match = re.search(r'(?:^|\n|\x1e)\s*090\s*(.*?)(?=\n|\x1e|\d{3}\s|$)', rec, re.DOTALL)
                     if field_090_match:
                         f090_text = field_090_match.group(1)
                         sub_a_match = re.search(r'(?:[\x1f]a|a)([^\x1f\n\t]+)', f090_text)
@@ -77,20 +78,11 @@ if uploaded_file is not None:
                             call_number = part_a
                         elif part_b:
                             call_number = part_b
-                    
-                    if not call_number:
-                        sub_a_alt = re.search(r'[\x1f]a([^\x1f\n]+)', rec)
-                        sub_b_alt = re.search(r'[\x1f]b([^\x1f\n]+)', rec)
-                        if sub_a_alt:
-                            p1 = sub_a_alt.group(1).strip()
-                            p2 = sub_b_alt.group(1).strip() if sub_b_alt else ""
-                            call_number = f"{p1}{p2}".strip()
 
-                    # 엑셀 에러를 일으키는 제어 문자 제거 함수 (탭, 줄바꿈 등 제외한 허용되지 않는 제어코드 제거)
+                    # 제어 문자 제거 함수
                     def clean_text(text):
                         if not isinstance(text, str):
                             return text
-                        # 제어 문자 및 엑셀에서 문제가 되는 특수 기호 제거
                         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
 
                     data_list.append({
@@ -108,8 +100,8 @@ if uploaded_file is not None:
             
             excel_file = 'AR_Points_Extracted.xlsx'
             
-            # 엑셀 저장 시 문제가 될 수 있는 글자들을 데이터프레임 전체에서 한 번 더 필터링
-            df_cleaned = df.applymap(lambda x: re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', str(x)) if pd.notnull(x) else x)
+            # 최신 판다스 버전 호환을 위해 applymap 대신 map 사용
+            df_cleaned = df.map(lambda x: re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', str(x)) if pd.notnull(x) else x)
             df_cleaned.to_excel(excel_file, index=False)
             
             with open(excel_file, "rb") as f:
