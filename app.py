@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("090 필드 강제 추출 정밀 패치 버전입니다.")
+st.write("코라스(KOLAS) 마크 파일에서 등록번호, 청구기호, AR Points를 자동으로 추출합니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
