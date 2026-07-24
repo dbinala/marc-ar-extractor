@@ -84,7 +84,7 @@ if uploaded_file is not None:
             if not ar_point:
                 continue
 
-            # 2. 090 필드 추출 ($a, $b, $c 서브필드 모두 추출)
+            # 2. 090 필드 추출 ($a, $b, 그리고 $c 뒤의 값까지 각각 서브필드로 분리하여 추출)
             candidates_090 = []
             for tag, f_data in fields:
                 if tag == '090':
@@ -98,9 +98,7 @@ if uploaded_file is not None:
                         elif sub.startswith('b'):
                             s_b = sub[1:].strip()
                         elif sub.startswith('c'):
-                            val = sub[1:].strip()
-                            if val:
-                                s_c = val if val.lower().startswith('c') else f"c{val}"
+                            s_c = sub[1:].strip()
                     candidates_090.append((s_a, s_b, s_c))
 
             if not candidates_090 and '090' in rec:
@@ -113,33 +111,40 @@ if uploaded_file is not None:
                     c_match = re.search(r'(?:[\x1f]c|c)\s*([A-Za-z0-9\-\.]+)', chunk_sub)
                     s_a = a_match.group(1).strip() if a_match else ""
                     s_b = b_match.group(1).strip() if b_match else ""
-                    c_val = c_match.group(1).strip() if c_match else ""
-                    s_c = f"c{c_val}" if c_val and not c_val.lower().startswith('c') else c_val
-                    if s_a or s_b or s_c:
+                    s_c = c_match.group(1).strip() if c_match else ""
+                    if s_a or s_b:
                         candidates_090.append((s_a, s_b, s_c))
 
             selected_a = ""
             selected_b = ""
             selected_c = ""
             for sa, sb, sc in candidates_090:
-                if sa and (sb or sc):
+                if sa and sb:
                     selected_a = sa
                     selected_b = sb
                     selected_c = sc
                     break
-            if not selected_a and not selected_b and not selected_c and candidates_090:
+            if not selected_a and not selected_b and candidates_090:
                 selected_a, selected_b, selected_c = candidates_090[0]
 
             part_a = selected_a
             part_b = selected_b
             part_c = selected_c
+
             if part_b:
                 clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', part_b)
                 if clean_b:
                     part_b = clean_b.group(1)
 
-            # 분류번호, 도서기호, 권호($c)를 공백으로 하나로 합치기
-            call_parts = [p for p in [part_a, part_b, part_c] if p]
+            # 분류번호, 도서기호, 그리고 $c 뒤의 값(c 문자는 제외하고 값만)을 조합하여 하나의 청구기호로 완성
+            call_parts = []
+            if part_a:
+                call_parts.append(part_a)
+            if part_b:
+                call_parts.append(part_b)
+            if part_c:
+                call_parts.append(part_c)
+            
             call_number = " ".join(call_parts)
 
             # 3. 049 필드 추출 (등록번호 여러 개 및 별치기호 처리)
