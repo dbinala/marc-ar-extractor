@@ -84,19 +84,24 @@ if uploaded_file is not None:
             if not ar_point:
                 continue
 
-            # 2. 090 필드 추출 ($a와 $b가 모두 존재하는 필드 우선 선택)
+            # 2. 090 필드 추출 ($a, $b, $c 서브필드 모두 추출)
             candidates_090 = []
             for tag, f_data in fields:
                 if tag == '090':
                     subfields = re.split(r'[\x1f]', f_data)
                     s_a = ""
                     s_b = ""
+                    s_c = ""
                     for sub in subfields:
                         if sub.startswith('a'):
                             s_a = sub[1:].strip()
                         elif sub.startswith('b'):
                             s_b = sub[1:].strip()
-                    candidates_090.append((s_a, s_b))
+                        elif sub.startswith('c'):
+                            val = sub[1:].strip()
+                            if val:
+                                s_c = val if val.lower().startswith('c') else f"c{val}"
+                    candidates_090.append((s_a, s_b, s_c))
 
             if not candidates_090 and '090' in rec:
                 search_target = variable_fields_part if 'variable_fields_part' in locals() else rec
@@ -104,35 +109,38 @@ if uploaded_file is not None:
                 for chunk in matches_090[1:]:
                     chunk_sub = chunk[:120]
                     a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', chunk_sub)
-                    b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.c]+)', chunk_sub)
+                    b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', chunk_sub)
+                    c_match = re.search(r'(?:[\x1f]c|c)\s*([A-Za-z0-9\-\.]+)', chunk_sub)
                     s_a = a_match.group(1).strip() if a_match else ""
                     s_b = b_match.group(1).strip() if b_match else ""
-                    if s_a or s_b:
-                        candidates_090.append((s_a, s_b))
+                    c_val = c_match.group(1).strip() if c_match else ""
+                    s_c = f"c{c_val}" if c_val and not c_val.lower().startswith('c') else c_val
+                    if s_a or s_b or s_c:
+                        candidates_090.append((s_a, s_b, s_c))
 
             selected_a = ""
             selected_b = ""
-            for sa, sb in candidates_090:
-                if sa and sb:
+            selected_c = ""
+            for sa, sb, sc in candidates_090:
+                if sa and (sb or sc):
                     selected_a = sa
                     selected_b = sb
+                    selected_c = sc
                     break
-            if not selected_a and not selected_b and candidates_090:
-                selected_a, selected_b = candidates_090[0]
+            if not selected_a and not selected_b and not selected_c and candidates_090:
+                selected_a, selected_b, selected_c = candidates_090[0]
 
             part_a = selected_a
             part_b = selected_b
+            part_c = selected_c
             if part_b:
-                # 도서기호 뒤에 붙는 c 및 하이픈, 숫자 조합(예: G226m c3-10 등)까지 포함하도록 정규식 확장
-                clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.c]*)', part_b)
+                clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', part_b)
                 if clean_b:
                     part_b = clean_b.group(1)
 
-            # 분류번호와 도서기호를 하나로 합치기
-            if part_a and part_b:
-                call_number = f"{part_a} {part_b}"
-            else:
-                call_number = part_a or part_b
+            # 분류번호, 도서기호, 권호($c)를 공백으로 하나로 합치기
+            call_parts = [p for p in [part_a, part_b, part_c] if p]
+            call_number = " ".join(call_parts)
 
             # 3. 049 필드 추출 (등록번호 여러 개 및 별치기호 처리)
             loc_reg_pairs = []
