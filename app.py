@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("청구기호(ISBN 혼입 방지 및 도서기호 정제 패치) 버전입니다.")
+st.write("별치기호와 청구기호 열 분리 정밀 패치 버전입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -45,7 +45,7 @@ if uploaded_file is not None:
                     reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', rec)
                     reg_no = reg_no_match.group(1) if reg_no_match else ""
                     
-                    # 2. 별치기호 (049 필드)
+                    # 2. 별치기호 (049 필드) - 독립 열로 분리
                     location_label = ""
                     f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
                     if f_match:
@@ -55,47 +55,39 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. 청구기호 (090 필드 정밀 파싱 - ISBN 및 불필요한 뒷부분 철저 차단)
+                    # 3. 청구기호 구성요소 (분류번호 $a와 도서기호 $b를 각각 독립 열로 추출)
                     part_a = ""
                     part_b = ""
                     
                     lines = rec.splitlines()
                     for line in lines:
-                        # 020(ISBN) 라인은 절대 090으로 읽지 않도록 필터링 강화
+                        # 020(ISBN) 라인 제외하고 명확히 090 라인 타겟팅
                         if '090' in line and '020' not in line:
-                            # a 서브필드 (분류번호: 숫자와 소수점만 허용, ISBN 번호가 섞이는 것 원천 차단)
+                            # a 서브필드 (분류번호: 숫자 및 소수점만 허용, ISBN 번호 유입 원천 차단)
                             a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', line)
                             if a_sub:
                                 part_a = a_sub.group(1).strip()
                                 
-                            # b 서브필드 (도서기호: 알파벳으로 시작해서 기호/숫자가 붙는 일반적인 도서기호 형태만 깔끔하게 추출)
-                            # 예: M478hb 까지만 잡히고 뒤에 붙는 불필요한 찌꺼기(1 aMcCarty 등)는 잘라냄
+                            # b 서브필드 (도서기호: 핵심 패턴만 추출)
                             b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', line)
                             if b_sub:
                                 raw_b = b_sub.group(1).strip()
-                                # 혹시 뒤에 붙을 수 있는 원치 않는 문자열 패턴을 정규식으로 한번 더 다듬기
-                                # 알파벳+숫자 조합의 핵심 도서기호 패턴만 남김 (예: M478hb)
                                 clean_b_match = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', raw_b)
                                 if clean_b_match:
                                     part_b = clean_b_match.group(1)
                                 else:
                                     part_b = raw_b
                             break
-                    
-                    # 조합 만들기: [별치기호] [a숫자] [b문자]
-                    call_parts = []
-                    if location_label: call_parts.append(location_label)
-                    if part_a: call_parts.append(part_a)
-                    if part_b: call_parts.append(part_b)
-                    
-                    final_call = " ".join(call_parts)
 
                     def clean_text(text):
                         if not isinstance(text, str): return text
                         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
 
+                    # 각각의 요소를 개별 컬럼으로 딕셔너리에 담기
                     data_list.append({
-                        "청구기호": clean_text(final_call),
+                        "별치기호": clean_text(location_label),
+                        "분류번호(090 $a)": clean_text(part_a),
+                        "도서기호(090 $b)": clean_text(part_b),
                         "시작등록번호": clean_text(reg_no),
                         "AR_Points": clean_text(ar_point)
                     })
