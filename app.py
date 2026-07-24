@@ -80,7 +80,73 @@ if uploaded_file is not None:
                                 part_b = clean_b.group(1)
                             else:
                                 part_b = raw_b
+# ---------------------------------
+# 049 필드 추출
+# ---------------------------------
 
+LOCATION_MAP = {
+    "KE": "원서",
+    "KP": "원-유",
+    "KC": "원아",
+    "KD": "원-초",
+    "KF": "원-청",
+    "KG": "원-일반"
+}
+
+
+def get_items(record):
+
+    items = []
+
+    m = re.search(r'049(.*?)(?=\x1e)', record, re.S)
+
+    if not m:
+        return items
+
+    field049 = m.group(1)
+
+    regs = re.findall(r'\x1fl([^\x1f\x1e]+)', field049)
+
+    locs = re.findall(r'\x1ff([^\x1f\x1e]+)', field049)
+
+    for i, reg in enumerate(regs):
+
+        loc = ""
+
+        if i < len(locs):
+
+            code = locs[i].strip()
+
+            loc = LOCATION_MAP.get(code, code)
+
+        items.append({
+            "등록번호": reg.strip(),
+            "별치기호": loc
+        })
+
+    return items
+
+
+# ---------------------------------
+# 실제 090 필드 찾기
+# ---------------------------------
+
+def get_real_090(record):
+
+    matches = list(re.finditer("090", record))
+
+    for m in matches:
+
+        pos = m.start()
+
+        block = record[pos:pos+180]
+
+        if "\x1fa" in block and "\x1fb" in block:
+
+            return block
+
+    return ""
+                    
                     def clean_text(text):
                         if not isinstance(text, str): return text
                         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
