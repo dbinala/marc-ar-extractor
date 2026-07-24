@@ -36,7 +36,6 @@ if uploaded_file is not None:
         data_list = []
         
         for rec in records:
-            # AR 포인트가 포함된 레코드 대상
             if 'AR' in rec or 'Pi' in rec or 'DJU' in rec or '090' in rec or '049' in rec:
                 ar_match = re.search(r'AR\s*P[io]+nts?\s*[:]?\s*([\d\.]+)', rec, re.IGNORECASE)
                 
@@ -61,9 +60,8 @@ if uploaded_file is not None:
                         else:
                             location_label = f_val
                     
-                    # 3. 청구기호 추출 (090 필드의 a와 b를 띄어쓰기 없이 붙이기)
+                    # 3. 청구기호 추출 (090 필드의 a와 b 조합)
                     call_number = ""
-                    # 090 필드 영역 찾기
                     field_090_match = re.search(r'090\s*(.*?)(?=\n|\x1e|\d{3}\s|$)', rec, re.DOTALL)
                     if field_090_match:
                         f090_text = field_090_match.group(1)
@@ -73,7 +71,6 @@ if uploaded_file is not None:
                         part_a = sub_a_match.group(1).strip() if sub_a_match else ""
                         part_b = sub_b_match.group(1).strip() if sub_b_match else ""
                         
-                        # 요청하신 대로 공백 없이 붙여서 결합 (예: 843M649m)
                         if part_a and part_b:
                             call_number = f"{part_a}{part_b}"
                         elif part_a:
@@ -81,7 +78,6 @@ if uploaded_file is not None:
                         elif part_b:
                             call_number = part_b
                     
-                    # 차선책 탐색
                     if not call_number:
                         sub_a_alt = re.search(r'[\x1f]a([^\x1f\n]+)', rec)
                         sub_b_alt = re.search(r'[\x1f]b([^\x1f\n]+)', rec)
@@ -90,11 +86,18 @@ if uploaded_file is not None:
                             p2 = sub_b_alt.group(1).strip() if sub_b_alt else ""
                             call_number = f"{p1}{p2}".strip()
 
+                    # 엑셀 에러를 일으키는 제어 문자 제거 함수 (탭, 줄바꿈 등 제외한 허용되지 않는 제어코드 제거)
+                    def clean_text(text):
+                        if not isinstance(text, str):
+                            return text
+                        # 제어 문자 및 엑셀에서 문제가 되는 특수 기호 제거
+                        return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
+
                     data_list.append({
-                        "별치기호": location_label,
-                        "청구기호": call_number,
-                        "시작등록번호": reg_no,
-                        "AR_Points": ar_point
+                        "별치기호": clean_text(location_label),
+                        "청구기호": clean_text(call_number),
+                        "시작등록번호": clean_text(reg_no),
+                        "AR_Points": clean_text(ar_point)
                     })
                     
         df = pd.DataFrame(data_list).drop_duplicates()
@@ -104,7 +107,10 @@ if uploaded_file is not None:
             st.dataframe(df, use_container_width=True)
             
             excel_file = 'AR_Points_Extracted.xlsx'
-            df.to_excel(excel_file, index=False)
+            
+            # 엑셀 저장 시 문제가 될 수 있는 글자들을 데이터프레임 전체에서 한 번 더 필터링
+            df_cleaned = df.applymap(lambda x: re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', str(x)) if pd.notnull(x) else x)
+            df_cleaned.to_excel(excel_file, index=False)
             
             with open(excel_file, "rb") as f:
                 st.download_button(
