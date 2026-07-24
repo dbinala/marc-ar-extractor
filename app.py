@@ -13,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("090 필드 격리 테스트 중입니다.")
+st.write("청구기호 추출 패치 버전입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -55,33 +55,40 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. [핵심수정] 오직 '090'이 포함된 블록/라인 내부에서만 a 뒤 숫자 찾기 (ISBN 020 차단)
+                    # 3. 청구기호(090 필드 파싱 최적화)
+                    # 090 기호 뒤에 나오는 a와 b 서브필드를 정밀하게 낚아챕니다.
                     part_a = ""
-                    # 레코드를 줄 단위로 쪼개서 '090'이라는 단어가 정확히 들어간 줄만 색출
-                    lines = rec.split('\n')
-                    for line in lines:
-                        # 020 등 다른 필드가 포함된 줄은 무시하고 정확히 090 필드인 경우만 타겟
-                        if '090' in line and '020' not in line:
-                            a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+)', line)
-                            if a_match:
-                                part_a = a_match.group(1)
-                                break
+                    part_b = ""
                     
-                    # 만약 줄 단위로 못 찾았을 경우, 정규식으로 090 뒤에 오는 a값만 엄격히 격리 추출
-                    if not part_a:
-                        strict_090 = re.search(r'090[^\n\x1e]*?(?:[\x1f]a|a)\s*([0-9]+)', rec)
-                        if strict_090:
-                            part_a = strict_090.group(1)
-
-                    # 최종 결합 테스트
-                    test_call = f"{location_label} {part_a}".strip() if part_a else location_label
+                    # '090' 문자열을 기준으로 뒤쪽 텍스트를 자릅니다.
+                    if '090' in rec:
+                        idx = rec.find('090')
+                        target_chunk = rec[idx:idx+100] # 090 뒤의 100글자 정도만 집중 탐색
+                        
+                        # a 뒤의 숫자 추출
+                        a_sub = re.search(r'(?:[\x1f]a|a)\s*([0-9]+)', target_chunk)
+                        if a_sub:
+                            part_a = a_sub.group(1).strip()
+                            
+                        # b 뒤의 문자/숫자 조합 추출
+                        b_sub = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9]+)', target_chunk)
+                        if b_sub:
+                            part_b = b_sub.group(1).strip()
+                    
+                    # 조합 만들기: [별치기호] [a숫자] [b문자]
+                    call_parts = []
+                    if location_label: call_parts.append(location_label)
+                    if part_a: call_parts.append(part_a)
+                    if part_b: call_parts.append(part_b)
+                    
+                    final_call = " ".join(call_parts)
 
                     def clean_text(text):
                         if not isinstance(text, str): return text
                         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
 
                     data_list.append({
-                        "청구기호(테스트)": clean_text(test_call),
+                        "청구기호": clean_text(final_call),
                         "시작등록번호": clean_text(reg_no),
                         "AR_Points": clean_text(ar_point)
                     })
