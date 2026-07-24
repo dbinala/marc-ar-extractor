@@ -13,8 +13,8 @@ try:
 except Exception:
     pass 
 
-st.title("📚 코라스 MARC AR 포인트 추출기")
-st.write("코라스(KOLAS)에서 추출한 마크(.TXT) 파일을 업로드하면 등록번호, 청구기호, AR 포인트를 자동으로 정리해 줍니다.")
+st.title("📚 코라스 MARC AR Points 추출기")
+st.write("코라스(KOLAS) 마크 파일에서 별치기호, 청구기호, 등록번호, AR 포인트를 자동으로 추출합니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -36,8 +36,8 @@ if uploaded_file is not None:
         data_list = []
         
         for rec in records:
-            # AR 포인트나 관련 키워드가 포함된 레코드 처리
-            if 'AR' in rec or 'Pi' in rec or 'DJU' in rec or '090' in rec:
+            # AR 포인트가 포함된 레코드 대상
+            if 'AR' in rec or 'Pi' in rec or 'DJU' in rec or '090' in rec or '049' in rec:
                 ar_match = re.search(r'AR\s*P[io]+nts?\s*[:]?\s*([\d\.]+)', rec, re.IGNORECASE)
                 
                 if ar_match:
@@ -47,39 +47,53 @@ if uploaded_file is not None:
                     reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', rec)
                     reg_no = reg_no_match.group(1) if reg_no_match else ""
                     
-                    # 2. 청구기호 추출 (090 필드 및 a, b 파싱)
+                    # 2. 별치기호 추출 (049 필드 안의 f 값 변환)
+                    location_label = ""
+                    f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', rec)
+                    if f_match:
+                        f_val = f_match.group(1).strip()
+                        if f_val == 'KP':
+                            location_label = "원-유"
+                        elif f_val == 'KC':
+                            location_label = "원아"
+                        elif f_val == 'KE':
+                            location_label = "원서"
+                        else:
+                            location_label = f_val
+                    
+                    # 3. 청구기호 추출 (090 필드의 a와 b를 띄어쓰기 없이 붙이기)
                     call_number = ""
-                    # 090 필드 부분 찾기 (090 뒤의 내용 추출)
+                    # 090 필드 영역 찾기
                     field_090_match = re.search(r'090\s*(.*?)(?=\n|\x1e|\d{3}\s|$)', rec, re.DOTALL)
                     if field_090_match:
                         f090_text = field_090_match.group(1)
-                        # a (분류번호) 와 b (도서기호) 추출 (유니코드 서브필드 구분자  또는 제어문자 대응)
                         sub_a_match = re.search(r'(?:[\x1f]a|a)([^\x1f\n\t]+)', f090_text)
                         sub_b_match = re.search(r'(?:[\x1f]b|b)([^\x1f\n\t]+)', f090_text)
                         
                         part_a = sub_a_match.group(1).strip() if sub_a_match else ""
                         part_b = sub_b_match.group(1).strip() if sub_b_match else ""
                         
-                        # 분류번호와 도서기호를 조합 (예: 843 M56t)
+                        # 요청하신 대로 공백 없이 붙여서 결합 (예: 843M649m)
                         if part_a and part_b:
-                            call_number = f"{part_a} {part_b}"
+                            call_number = f"{part_a}{part_b}"
                         elif part_a:
                             call_number = part_a
                         elif part_b:
                             call_number = part_b
                     
-                    # 만약 위 정규식으로 090을 못 찾았을 경우를 대비한 유연한 대안 탐색
+                    # 차선책 탐색
                     if not call_number:
                         sub_a_alt = re.search(r'[\x1f]a([^\x1f\n]+)', rec)
                         sub_b_alt = re.search(r'[\x1f]b([^\x1f\n]+)', rec)
                         if sub_a_alt:
                             p1 = sub_a_alt.group(1).strip()
                             p2 = sub_b_alt.group(1).strip() if sub_b_alt else ""
-                            call_number = f"{p1} {p2}".strip()
+                            call_number = f"{p1}{p2}".strip()
 
                     data_list.append({
-                        "시작등록번호": reg_no,
+                        "별치기호": location_label,
                         "청구기호": call_number,
+                        "시작등록번호": reg_no,
                         "AR_Points": ar_point
                     })
                     
@@ -89,7 +103,7 @@ if uploaded_file is not None:
             st.success(f"총 {len(df)}개의 데이터를 성공적으로 추출했습니다!")
             st.dataframe(df, use_container_width=True)
             
-            excel_file = 'AR_Points_With_CallNumber.xlsx'
+            excel_file = 'AR_Points_Extracted.xlsx'
             df.to_excel(excel_file, index=False)
             
             with open(excel_file, "rb") as f:
