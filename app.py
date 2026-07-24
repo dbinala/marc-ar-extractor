@@ -1,123 +1,365 @@
+# ==============================
+# app.py
+# KORAS MARC AR Extractor
+# Part 1
+# ==============================
+
 import re
+from io import BytesIO
+
 import pandas as pd
 import streamlit as st
-from PIL import Image
 
-# 웹페이지 기본 설정
-st.set_page_config(page_title="MARC AR Points 추출기", page_icon="📚", layout="centered")
+st.set_page_config(
+    page_title="KORAS MARC AR Extractor",
+    page_icon="📚",
+    layout="wide"
+)
 
-try:
-    img = Image.open("logo.png")
-    st.image(img, width=150)
-except Exception:
-    pass 
+st.title("📚 KORAS MARC AR Extractor")
+st.caption("049 / 090 / 521 필드를 이용하여 AR 데이터를 추출합니다.")
 
-st.title("📚 코라스 MARC AR Points 추출기")
-st.write("MARC 디렉토리 및 필드 구조 정밀 대응 버전입니다.")
+uploaded_file = st.file_uploader(
+    "반출마크 TXT(MARC) 파일 선택",
+    type=["txt", "TXT"]
+)
 
-uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
+# -----------------------------
+# 인코딩 자동 감지
+# -----------------------------
+
+def read_file(upload):
+
+    raw = upload.read()
+
+    encodings = [
+        "cp949",
+        "euc-kr",
+        "utf-8",
+        "utf-16",
+        "utf-16-le",
+        "utf-16-be"
+    ]
+
+    for enc in encodings:
+        try:
+            return raw.decode(enc)
+        except:
+            pass
+
+    return raw.decode(
+        "cp949",
+        errors="ignore"
+    )
+
+# -----------------------------
+# 코드 변환
+# -----------------------------
+
+LOCATION_MAP = {
+
+    "KE":"원서",
+
+    "KP":"원-유",
+
+    "KC":"원-아",
+
+    "KD":"원-초",
+
+    "KF":"원-청",
+
+    "KG":"원-일반"
+
+}
+
+def convert_location(code):
+
+    if code in LOCATION_MAP:
+        return LOCATION_MAP[code]
+
+    return code
+
+# -----------------------------
+# AR Point 추출
+# -----------------------------
+
+def extract_ar(record):
+
+    m = re.search(
+        r"AR\s*Pionts?\s*:\s*([0-9.]+)",
+        record,
+        re.I
+    )
+
+    if m:
+        return m.group(1)
+
+    return ""
+
+# -----------------------------
+# 090 추출
+# -----------------------------
+
+def extract_call_number(record):
+
+    class_no = ""
+
+    book_no = ""
+
+    m = re.search(
+        r"090.*?\x1fa([^\x1f\x1e]+)",
+        record,
+        re.S
+    )
+
+    if m:
+        class_no = m.group(1).strip()
+
+    m = re.search(
+        r"090.*?\x1fb([^\x1f\x1e]+)",
+        record,
+        re.S
+    )
+
+    if m:
+        book_no = m.group(1).strip()
+
+    call_no = f"{class_no} {book_no}".strip()
+
+    return class_no, book_no, call_no
+    # -----------------------------
+# 049 추출 (등록번호 + 별치기호)
+# -----------------------------
+
+def extract_items(record):
+
+    items = []
+
+    idx = record.find("049")
+
+    if idx == -1:
+        return items
+
+    end = record.find("\x1e", idx)
+
+    if end == -1:
+        end = len(record)
+
+    field049 = record[idx:end]
+
+    regs = re.findall(
+        r"\x1fl([^\x1f\x1e]+)",
+        field049
+    )
+
+    locs = re.findall(
+        r"\x1ff([^\x1f\x1e]+)",
+        field049
+    )
+
+    if len(regs) == 0:
+        return items
+
+    for i, reg in enumerate(regs):
+
+        loc = ""
+
+        if i < len(locs):
+            loc = convert_location(locs[i])
+
+        items.append(
+            {
+                "등록번호": reg.strip(),
+                "별치기호": loc
+            }
+        )
+
+    return items
+
+
+# -----------------------------
+# 레코드 파싱
+# -----------------------------
+
+def parse_record(record):
+
+    ar = extract_ar(record)
+
+    class_no, book_no, call_no = extract_call_number(record)
+
+    items = extract_items(record)
+
+    rows = []
+
+    if len(items) == 0:
+
+        rows.append(
+            {
+                "등록번호":"",
+                "별치기호":"",
+                "분류번호":class_no,
+                "도서기호":book_no,
+                "청구기호":call_no,
+                "AR Points":ar
+            }
+        )
+
+        return rows
+
+    for item in items:
+
+        rows.append(
+            {
+                "등록번호":item["등록번호"],
+                "별치기호":item["별치기호"],
+                "분류번호":class_no,
+                "도서기호":book_no,
+                "청구기호":call_no,
+                "AR Points":ar
+            }
+        )
+
+    return rows
+
+
+# -----------------------------
+# 전체 레코드 분리
+# -----------------------------
+
+def split_records(text):
+
+    records = []
+
+    for rec in text.split("\x1d"):
+
+        rec = rec.strip()
+
+        if len(rec) == 0:
+            continue
+
+        records.append(rec)
+
+    return records
+    # -----------------------------
+# 메인 처리
+# -----------------------------
 
 if uploaded_file is not None:
-    bytes_data = uploaded_file.read()
-    full_text = None
-    
-    for enc in ['cp949', 'euc-kr', 'utf-8', 'utf-16']:
-        try:
-            full_text = bytes_data.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
-            
-    if full_text is None:
-        st.error("파일 인코딩을 인식할 수 없습니다.")
-    else:
-        # MARC 레코드 단위 구분자('\x1d' 또는 레코드 시작 기호)로 분리
-        records = re.split(r'[\x1d]+', full_text)
-        data_list = []
-        
-        for rec in records:
-            if not rec.strip():
-                continue
-                
-            # 디렉토리 숫자 영역과 실제 본문 영역 분리 
-            # (보통 001~999 같은 태그 번호나 '' 기호, 혹은 KMO 등의 문자열을 기준으로 본문 영역을 식별)
-            body_text = rec
-            if '' in rec:
-                parts = rec.split('', 1)
-                if len(parts) > 1:
-                    body_text = parts[1] # 실제 데이터 영역만 추출
-            
-            # 본문 전체에서 필요한 데이터 탐색
-            if 'AR' in body_text or 'Pi' in body_text or 'DJU' in body_text or '090' in body_text or '049' in body_text or '521' in body_text:
-                
-                # 1. AR Points 추출 (521 필드 등)
-                ar_match = re.search(r'AR\s*P[io]+nts?\s*[:]?\s*([\d\.]+)', body_text, re.IGNORECASE)
-                ar_point = ar_match.group(1) if ar_match else ""
-                
-                # 2. 등록번호 추출
-                reg_no_match = re.search(r'(DJU[A-Za-z0-9\-_]+)', body_text)
-                reg_no = reg_no_match.group(1) if reg_no_match else ""
-                
-                # 3. 별치기호 추출 (049 필드 $f)
-                location_label = ""
-                f_match = re.search(r'(?:[\x1f]f|f)([A-Za-z0-9\-]+)', body_text)
-                if f_match:
-                    f_val = f_match.group(1).strip()
-                    if f_val == 'KP': location_label = "원-유"
-                    elif f_val == 'KC': location_label = "원아"
-                    elif f_val == 'KE': location_label = "원서"
-                    else: location_label = f_val
-                
-                # 4. 청구기호 추출 (090 필드 $a, $b)
-                part_a = ""
-                part_b = ""
-                
-                # 090 필드 영역 탐색
-                if '090' in body_text:
-                    idx_090 = body_text.find('090')
-                    chunk_090 = body_text[idx_090:idx_090+100]
-                    
-                    # 분류번호 $a (숫자 및 소수점)
-                    a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+(?:\.[0-9]+)?)', chunk_090)
-                    if a_match:
-                        part_a = a_match.group(1).strip()
-                        
-                    # 도서기호 $b (알파벳, 숫자 조합)
-                    b_match = re.search(r'(?:[\x1f]b|b)\s*([A-Za-z0-9\-\.]+)', chunk_090)
-                    if b_match:
-                        raw_b = b_match.group(1).strip()
-                        clean_b = re.match(r'([A-Za-z]+\d+[A-Za-z0-9\-\.]*)', raw_b)
-                        if clean_b:
-                            part_b = clean_b.group(1)
-                        else:
-                            part_b = raw_b
 
-                def clean_text(text):
-                    if not isinstance(text, str): return text
-                    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text).strip()
+    text = read_file(uploaded_file)
 
-                # 데이터가 유효한 경우에만 리스트에 추가
-                if reg_no or ar_point or part_a:
-                    data_list.append({
-                        "별치기호": clean_text(location_label),
-                        "분류번호(090 $a)": clean_text(part_a),
-                        "도서기호(090 $b)": clean_text(part_b),
-                        "시작등록번호": clean_text(reg_no),
-                        "AR_Points": clean_text(ar_point)
-                    })
-                    
-        df = pd.DataFrame(data_list).drop_duplicates()
-        
-        if not df.empty:
-            df.index = range(1, len(df) + 1)
-            st.success(f"총 {len(df)}개 추출 성공!")
-            st.dataframe(df, use_container_width=True)
-            
-            excel_file = 'AR_Points_Extracted.xlsx'
-            df_cleaned = df.map(lambda x: re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', str(x)) if pd.notnull(x) else x)
-            df_cleaned.to_excel(excel_file, index=True)
-            
-            with open(excel_file, "rb") as f:
-                st.download_button(label="📥 엑셀 다운로드", data=f, file_name=excel_file)
-        else:
-            st.warning("조건에 맞는 데이터를 찾지 못했습니다. 파일 구조를 확인해 주세요.")
+    records = split_records(text)
+
+    result = []
+
+    progress = st.progress(0)
+
+    total = len(records)
+
+    for i, rec in enumerate(records):
+
+        result.extend(parse_record(rec))
+
+        if total > 0:
+            progress.progress((i + 1) / total)
+
+    df = pd.DataFrame(result)
+
+    # 중복 제거
+    df = df.drop_duplicates()
+
+    # 등록번호 기준 정렬
+    if "등록번호" in df.columns:
+        df = df.sort_values(
+            by="등록번호",
+            ignore_index=True
+        )
+
+    st.success(f"{len(df):,}건 추출 완료")
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # -----------------------------
+    # 통계
+    # -----------------------------
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric(
+            "등록번호",
+            f"{len(df):,}"
+        )
+
+    with c2:
+        ar_count = (
+            df["AR Points"]
+            .astype(str)
+            .replace("", pd.NA)
+            .dropna()
+            .count()
+        )
+
+        st.metric(
+            "AR 보유",
+            f"{ar_count:,}"
+        )
+
+    with c3:
+        st.metric(
+            "별치기호 종류",
+            df["별치기호"].nunique()
+        )
+
+    # -----------------------------
+    # Excel 저장
+    # -----------------------------
+
+    excel = BytesIO()
+
+    with pd.ExcelWriter(
+        excel,
+        engine="openpyxl"
+    ) as writer:
+
+        df.to_excel(
+            writer,
+            index=False,
+            sheet_name="AR"
+        )
+
+        ws = writer.sheets["AR"]
+
+        for cell in ws[1]:
+            cell.font = cell.font.copy(bold=True)
+
+        for col in ws.columns:
+
+            length = 0
+
+            column = col[0].column_letter
+
+            for cell in col:
+
+                try:
+                    length = max(
+                        length,
+                        len(str(cell.value))
+                    )
+                except:
+                    pass
+
+            ws.column_dimensions[column].width = min(length + 4, 35)
+
+    excel.seek(0)
+
+    st.download_button(
+        "📥 Excel 다운로드",
+        excel,
+        file_name="AR_Extract.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
