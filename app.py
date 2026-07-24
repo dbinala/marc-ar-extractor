@@ -6,7 +6,6 @@ from PIL import Image
 # 웹페이지 기본 설정
 st.set_page_config(page_title="MARC AR Points 추출기", page_icon="📚", layout="centered")
 
-# 로고 이미지 불러오기
 try:
     img = Image.open("logo.png")
     st.image(img, width=150)
@@ -14,7 +13,7 @@ except Exception:
     pass 
 
 st.title("📚 코라스 MARC AR Points 추출기")
-st.write("청구기호 테스트 중입니다.")
+st.write("090 필드 격리 테스트 중입니다.")
 
 uploaded_file = st.file_uploader("마크(.TXT) 파일을 선택해주세요", type=["txt"])
 
@@ -56,26 +55,26 @@ if uploaded_file is not None:
                         elif f_val == 'KE': location_label = "원서"
                         else: location_label = f_val
                     
-                    # 3. [테스트] 090 필드의 a 뒤 숫자만 먼저 추출해보기
+                    # 3. [핵심수정] 오직 '090'이 포함된 블록/라인 내부에서만 a 뒤 숫자 찾기 (ISBN 020 차단)
                     part_a = ""
-                    # 090 필드가 포함된 줄이나 블록 찾기
+                    # 레코드를 줄 단위로 쪼개서 '090'이라는 단어가 정확히 들어간 줄만 색출
                     lines = rec.split('\n')
                     for line in lines:
-                        if '090' in line:
-                            # a 기호와 그 뒤에 오는 숫자 찾기 (유니코드 제어문자  대응)
+                        # 020 등 다른 필드가 포함된 줄은 무시하고 정확히 090 필드인 경우만 타겟
+                        if '090' in line and '020' not in line:
                             a_match = re.search(r'(?:[\x1f]a|a)\s*([0-9]+)', line)
                             if a_match:
                                 part_a = a_match.group(1)
                                 break
                     
-                    # 만약 위에서 못 찾았으면 전체 텍스트에서 a 뒤 숫자 탐색
+                    # 만약 줄 단위로 못 찾았을 경우, 정규식으로 090 뒤에 오는 a값만 엄격히 격리 추출
                     if not part_a:
-                        a_match_all = re.search(r'(?:[\x1f]a|a)\s*([0-9]+)', rec)
-                        if a_match_all:
-                            part_a = a_match_all.group(1)
+                        strict_090 = re.search(r'090[^\n\x1e]*?(?:[\x1f]a|a)\s*([0-9]+)', rec)
+                        if strict_090:
+                            part_a = strict_090.group(1)
 
-                    # 최종 결합 테스트 (별치기호 + a 숫자)
-                    test_call = f"{location_label} {part_a}".strip()
+                    # 최종 결합 테스트
+                    test_call = f"{location_label} {part_a}".strip() if part_a else location_label
 
                     def clean_text(text):
                         if not isinstance(text, str): return text
